@@ -24,7 +24,7 @@ producer = KafkaProducer(
 
 # List all files in the S3 directory
 files = fs.ls(f'{s3_bucket}/{s3_directory}')
-
+cnt = 0
 # Loop through all the files in the directory
 for s3_file_path in files:
     print(f"Reading file: {s3_file_path}")
@@ -33,9 +33,10 @@ for s3_file_path in files:
         raw_data = s3_file.read()
 
     producer.send('my_topic', value=raw_data)
+    cnt += 1
 
 # Flush and close the producer
 producer.flush()
 producer.close()
 
-print(f"All files processed and sent to Kafka successfully.")
+print(f"All {cnt} files processed and sent to Kafka successfully.")

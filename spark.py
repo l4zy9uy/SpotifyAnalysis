@@ -4,7 +4,6 @@ from pyspark.sql import SparkSession
 from dotenv import load_dotenv
 import pickle
 from pyspark.sql.functions import col, udf, from_json
-from pyspark.sql.types import StringType
 from pyspark.sql.types import StringType, StructType, StructField
 
 load_dotenv()
@@ -47,16 +46,20 @@ json_schema = StructType([
 # Parse the deserialized JSON string into a structured column using from_json
 parsed_df = deserialized_df.withColumn("parsed_json", from_json(col("deserialized_value"), json_schema))
 
-# Extract the track_uri field from the parsed JSON
 result_df = parsed_df.select(
-    col("key").cast("string"),  # Cast the key as string
     col("parsed_json.track_uri")  # Access track_uri from deserialized_value
 )
 
 # Write the results to the console
-query = result_df.writeStream \
+query = result_df\
+    .writeStream \
     .outputMode("append") \
-    .format("console") \
+    .format("text") \
+    .option("path", "track_uris") \
+    .option("checkpointLocation", "checkpoint") \
+    .option("truncate", "False") \
+    .option("numRows", 1000) \
+    .trigger(processingTime="10 seconds") \
     .start()
 
 # Wait for the stream to finish
