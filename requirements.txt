@@ -1,0 +1,8 @@
+boto3==1.35.37
+kafka_python==2.0.2
+kaggle==1.6.17
+protobuf==4.21.6
+pyspark==3.5.3
+python-dotenv==1.0.1
+s3fs==2024.9.0
+spotipy==2.24.0
