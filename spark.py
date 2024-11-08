@@ -11,12 +11,12 @@ load_dotenv()
 kafka_package = os.getenv('KAFKA_PACKAGE')
 
 spark = SparkSession.builder \
-    .appName('g1') \
+    .appName('export_track_ids') \
     .config('spark.jars.packages', kafka_package) \
     .getOrCreate()
 
-kafka_brokers = os.getenv("KAFKA_BOOTSTRAP_SERVERS")
-kafka_topic = 'my_topic'
+kafka_brokers = os.getenv("KAFKA_BOOTSTRAP_REMOTE_SERVERS")
+kafka_topic = os.getenv("TOPIC_NAME")
 
 kafka_df = spark.readStream \
     .format("kafka") \
@@ -55,8 +55,8 @@ query = result_df\
     .writeStream \
     .outputMode("append") \
     .format("text") \
-    .option("path", "track_uris") \
-    .option("checkpointLocation", "checkpoint") \
+    .option("path", f"{os.getenv('GCS_BUCKET1_PATH')}/track_uris") \
+    .option("checkpointLocation", f"{os.getenv('GCS_BUCKET1_PATH')}/checkpoint") \
     .option("truncate", "False") \
     .option("numRows", 1000) \
     .trigger(processingTime="10 seconds") \
