@@ -13,7 +13,14 @@ kafka_package = os.getenv('KAFKA_PACKAGE')
 spark = SparkSession.builder \
     .appName('export_track_ids') \
     .config('spark.jars.packages', kafka_package) \
+    .config('spark.executor.memory', '4g') \
+    .config('spark.driver.memory', '4g') \
     .getOrCreate()
+
+spark.sparkContext.setLogLevel("INFO")
+
+spark.conf.set("google.cloud.auth.service.account.enable", "true")
+spark.conf.set("google.cloud.auth.service.account.json.keyfile", "bigdata-class-438306-d7222b6dac49.json")
 
 kafka_brokers = os.getenv("KAFKA_BOOTSTRAP_REMOTE_SERVERS")
 kafka_topic = os.getenv("TOPIC_NAME")
@@ -51,15 +58,24 @@ result_df = parsed_df.select(
 )
 
 # Write the results to the console
-query = result_df\
+def write_batch_to_files(batch_df, batch_id):
+    # Skip empty batches
+    if batch_df.isEmpty():
+        return
+
+    # Coalesce to a single partition for a single file output
+    batch_df = batch_df.coalesce(1)
+
+    # Write to a specific file
+    file_path = f"{os.getenv('GCS_BUCKET2_PATH')}/track_uris.txt"
+    batch_df.write.mode("append").text(file_path)
+
+# Use foreachBatch to process each micro-batch and apply custom logic
+query = result_df \
     .writeStream \
     .outputMode("append") \
-    .format("text") \
-    .option("path", f"{os.getenv('GCS_BUCKET1_PATH')}/track_uris") \
-    .option("checkpointLocation", f"{os.getenv('GCS_BUCKET1_PATH')}/checkpoint") \
-    .option("truncate", "False") \
-    .option("numRows", 1000) \
-    .trigger(processingTime="10 seconds") \
+    .foreachBatch(write_batch_to_files) \
+    .trigger(processingTime="1800 seconds") \
     .start()
 
 # Wait for the stream to finish
