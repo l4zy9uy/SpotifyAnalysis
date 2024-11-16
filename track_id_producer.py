@@ -69,7 +69,7 @@ def main():
     args = parser.parse_args()
 
     logging.info("Starting the producer for large pickle file processing.")
-    process_large_pickle_file(args.bucket, args.file, args.topic_name)
+    process_large_pickle_file(os.getenv(args.bucket), os.getenv(args.file), os.getenv(args.topic_name))
 
     producer.close()
     logging.info("All objects sent successfully.")

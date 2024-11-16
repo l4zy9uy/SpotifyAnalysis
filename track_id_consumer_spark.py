@@ -33,7 +33,7 @@ kafka_brokers = os.getenv("KAFKA_BOOTSTRAP_REMOTE_SERVERS")
 kafka_df = spark.readStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", kafka_brokers) \
-    .option("subscribe", args.topic_name) \
+    .option("subscribe", os.getenv(args.topic_name)) \
     .load()
 
 def deserialize_pickle(pickled_bytes):
@@ -72,7 +72,7 @@ def write_batch_to_files(batch_df, batch_id):
     batch_df = batch_df.coalesce(1)
 
     # Write to a specific file
-    file_path = f"{args.bucket_path}/track_uris.txt"
+    file_path = f"{os.getenv(args.bucket_path)}/track_uris.txt"
     batch_df.write.mode("append").text(file_path)
 
 # Use foreachBatch to process each micro-batch and apply custom logic
