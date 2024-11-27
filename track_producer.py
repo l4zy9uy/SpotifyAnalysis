@@ -1,5 +1,7 @@
 import os
 import json
+import time
+
 from google.cloud import storage
 from dotenv import load_dotenv
 from spotipy.oauth2 import SpotifyClientCredentials
@@ -51,10 +53,10 @@ def chunk_list(data, chunk_size):
         yield data[i:i + chunk_size]
 
 
-def process_and_save_to_gcs(buckets, folder_name, output_bucket, output_file_name):
+def process_and_save_to_gcs_stream(buckets, folder_name, output_bucket, output_file_name):
     """
     Reads track URIs directly from multiple GCS buckets and folders, retrieves their details via Spotify API,
-    and writes the track data to a JSON file on GCS.
+    and writes the track data to a JSONL file on GCS in a streaming fashion.
 
     Args:
         buckets (list): List of GCS bucket names to read input files from.
@@ -72,32 +74,27 @@ def process_and_save_to_gcs(buckets, folder_name, output_bucket, output_file_nam
     # Convert set to list for processing
     all_track_uris = list(all_track_uris)
 
-    # Initialize a list to store track data
-    all_tracks = []
+    # Get the output GCS bucket and blob
+    bucket = storage_client.bucket(output_bucket)
+    blob = bucket.blob(output_file_name)
 
-    # Process URIs in chunks of 50
-    for chunk in chunk_list(all_track_uris, 50):
-        try:
-            # Fetch track details for up to 50 URIs
-            tracks = sp.tracks(chunk)
-            for track in tracks['tracks']:
-                if track:  # Ensure track is not None
-                    all_tracks.append(track)  # Add track data to the list
-                    print(f"Fetched: {track['name']} - {track['uri']}")
-        except Exception as e:
-            print(f"Error processing chunk: {chunk}, Error: {e}")
-
-    # Convert track data to JSON
-    json_data = json.dumps(all_tracks, ensure_ascii=False, indent=4)
-
-    # Upload the JSON file to GCS
-    try:
-        bucket = storage_client.bucket(output_bucket)
-        blob = bucket.blob(output_file_name)
-        blob.upload_from_string(json_data, content_type='application/json')
-        print(f"JSON file successfully written to GCS: gs://{output_bucket}/{output_file_name}")
-    except Exception as e:
-        print(f"Error writing JSON to GCS: {e}")
+    # Initialize a streaming upload to GCS
+    with blob.open("w", content_type="application/json") as output_file:
+        # Process URIs in chunks of 50
+        count = 0
+        for chunk in chunk_list(all_track_uris, 50):
+            try:
+                # Fetch track details for up to 50 URIs
+                tracks = sp.tracks(chunk)
+                for track in tracks['tracks']:
+                    if track:  # Ensure track is not None
+                        json_line = json.dumps(track, ensure_ascii=False)
+                        output_file.write(json_line + "\n")  # Write each track as a line
+                        print(f"{count} Fetched and written: {track['name']} - {track['uri']}")
+            except Exception as e:
+                print(f"Error processing chunk: {chunk}, Error: {e}")
+        time.sleep(0.5)
+    print(f"JSONL file successfully written to GCS: gs://{output_bucket}/{output_file_name}")
 
 
 if __name__ == '__main__':
@@ -110,8 +107,8 @@ if __name__ == '__main__':
 
     # Output GCS bucket and file name
     output_bucket = os.getenv('OUTPUT_GCS_BUCKET')
-    output_file_name = 'spotify_tracks.json'
+    output_file_name = 'spotify_tracks.jsonl'
 
     print("Fetching track URIs directly from multiple GCS buckets and folders...")
-    process_and_save_to_gcs(gcs_buckets, input_folder, output_bucket, output_file_name)
+    process_and_save_to_gcs_stream(gcs_buckets, input_folder, output_bucket, output_file_name)
     print("Processing finished successfully.")
