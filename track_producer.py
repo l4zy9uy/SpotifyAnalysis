@@ -6,6 +6,7 @@ from google.cloud import storage
 from dotenv import load_dotenv
 from spotipy.oauth2 import SpotifyClientCredentials
 import spotipy
+from spotipy.exceptions import SpotifyException
 
 # Load environment variables
 load_dotenv()
@@ -14,22 +15,38 @@ secret = os.getenv('SPOTIFY_CLIENT_SECRET')
 
 # Spotify API authentication
 client_credentials_manager = SpotifyClientCredentials(client_id=cid, client_secret=secret)
+
 sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
+sp.search(q="test", type="track")  # This should not raise an error
 
 # Initialize GCS Client
 storage_client = storage.Client()
 
 
+def is_valid_uri(uri):
+    """
+    Validates whether a given URI is a valid Spotify track URI.
+
+    Args:
+        uri (str): The URI to validate.
+
+    Returns:
+        bool: True if valid, False otherwise.
+    """
+    return uri.startswith("spotify:track:") and len(uri.split(":")) == 3
+
+
 def read_files_from_multiple_buckets(buckets, folder_name):
     """
-    Reads .txt files from specified folders in multiple GCS buckets whose names start with 'part'.
+    Reads .txt files from specified folders in multiple GCS buckets, validates URIs,
+    and yields only valid Spotify track URIs.
 
     Args:
         buckets (list): List of GCS bucket names.
         folder_name (str): Folder name inside each bucket.
 
     Yields:
-        str: Each line (URI) from all .txt files in the specified buckets and folders.
+        str: Valid Spotify track URIs from all .txt files in the specified buckets and folders.
     """
     for bucket_name in buckets:
         try:
@@ -40,7 +57,11 @@ def read_files_from_multiple_buckets(buckets, folder_name):
                     print(f"Reading file {blob.name} from bucket {bucket_name}")
                     data = blob.download_as_text()  # Read file content directly
                     for line in data.splitlines():
-                        yield line.strip()
+                        uri = line.strip()
+                        if is_valid_uri(uri):
+                            yield uri
+                        else:
+                            print(f"Invalid URI skipped: {uri}")
         except Exception as e:
             print(f"Error reading files from bucket {bucket_name}, folder {folder_name}: {e}")
 
@@ -73,7 +94,7 @@ def process_and_save_to_gcs_stream(buckets, folder_name, output_bucket, output_f
 
     # Convert set to list for processing
     all_track_uris = list(all_track_uris)
-
+    print("Read successfully")
     # Get the output GCS bucket and blob
     bucket = storage_client.bucket(output_bucket)
     blob = bucket.blob(output_file_name)
@@ -85,12 +106,20 @@ def process_and_save_to_gcs_stream(buckets, folder_name, output_bucket, output_f
         for chunk in chunk_list(all_track_uris, 50):
             try:
                 # Fetch track details for up to 50 URIs
-                tracks = sp.tracks(chunk)
+                print("Send api....")
+                try:
+                    tracks = sp.tracks(chunk)
+                except SpotifyException as e:
+                    if e.http_status == 429:  # Rate limit error
+                        retry_after = int(e.headers.get("Retry-After", 1))
+                        print(f"Rate limit hit. Retrying after {retry_after} seconds...")
+                        time.sleep(retry_after)
                 for track in tracks['tracks']:
                     if track:  # Ensure track is not None
                         json_line = json.dumps(track, ensure_ascii=False)
                         output_file.write(json_line + "\n")  # Write each track as a line
                         print(f"{count} Fetched and written: {track['name']} - {track['uri']}")
+                        count+=1
             except Exception as e:
                 print(f"Error processing chunk: {chunk}, Error: {e}")
         time.sleep(0.5)
@@ -98,6 +127,9 @@ def process_and_save_to_gcs_stream(buckets, folder_name, output_bucket, output_f
 
 
 if __name__ == '__main__':
+    result = sp.tracks(["spotify:track:11dFghVXANMlKmJXsNCbNl"])
+    print(result)
+
     # List of GCS buckets to fetch files from
     gcs_buckets = [os.getenv('GCS_BUCKET1'), os.getenv('GCS_BUCKET2'), os.getenv('GCS_BUCKET3'),
                    os.getenv('GCS_BUCKET4'), os.getenv('GCS_BUCKET5'), os.getenv('GCS_BUCKET6')]
