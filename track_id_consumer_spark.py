@@ -80,7 +80,7 @@ query = result_df \
     .writeStream \
     .outputMode("append") \
     .foreachBatch(write_batch_to_files) \
-    .trigger(processingTime="1800 seconds") \
+    .trigger(processingTime="300 seconds") \
     .start()
 
 # Wait for the stream to finish
