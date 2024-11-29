@@ -42,12 +42,15 @@ track_schema = StructType([
 ])
 
 # Read the JSON file
-gcs_input_path = "gs://don-result-csv/spotify_tracks.json"
+gcs_input_path = "gs://don-result-csv/spotify_tracks-1.json"
 
 # Read the JSON file from GCS into a Spark DataFrame
 df = spark.read \
     .schema(track_schema) \
-    .json(gcs_input_path, multiLine=True)
+    .json(gcs_input_path, multiLine=False)
+
+print("count: ", df.count())
+
 
 # Combine all track artists and album artists into single columns
 processed_df = df.select(
@@ -63,9 +66,9 @@ processed_df = df.select(
 )
 
 # Write the processed data to a CSV file
-output_csv_path = './spotify_tracks'
+output_csv_path = "gs://don-result-csv/processed_spotify_tracks/"
 processed_df.coalesce(1).write \
-    .mode('overwrite') \
+    .mode('append') \
     .option('header', 'true') \
     .csv(output_csv_path)
 
