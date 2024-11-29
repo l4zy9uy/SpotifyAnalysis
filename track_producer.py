@@ -125,7 +125,7 @@ def process_and_save_to_gcs_stream(buckets, folder_name, output_bucket, output_f
         time.sleep(0.5)
         if count % 40000 == 0:
             print("done 1 part")
-            time.sleep(60)
+            time.sleep(120)
     print(f"JSONL file successfully written to GCS: gs://{output_bucket}/{output_file_name}")
 
 
