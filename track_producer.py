@@ -64,6 +64,7 @@ def read_files_from_multiple_buckets(buckets, folder_name):
                             print(f"Invalid URI skipped: {uri}")
         except Exception as e:
             print(f"Error reading files from bucket {bucket_name}, folder {folder_name}: {e}")
+        time.sleep(15)
 
 
 def chunk_list(data, chunk_size):
