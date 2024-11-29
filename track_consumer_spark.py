@@ -42,7 +42,7 @@ track_schema = StructType([
 ])
 
 # Read the JSON file
-gcs_input_path = "gs://don-result-csv/spotify_tracks-1.json"
+gcs_input_path = "gs://don-result-csv/*.json"
 
 # Read the JSON file from GCS into a Spark DataFrame
 df = spark.read \
