@@ -123,6 +123,9 @@ def process_and_save_to_gcs_stream(buckets, folder_name, output_bucket, output_f
             except Exception as e:
                 print(f"Error processing chunk: {chunk}, Error: {e}")
         time.sleep(0.5)
+        if count % 40000 == 0:
+            print("done 1 part")
+            time.sleep(60)
     print(f"JSONL file successfully written to GCS: gs://{output_bucket}/{output_file_name}")
 
 
@@ -139,7 +142,7 @@ if __name__ == '__main__':
 
     # Output GCS bucket and file name
     output_bucket = os.getenv('OUTPUT_GCS_BUCKET')
-    output_file_name = 'spotify_tracks.jsonl'
+    output_file_name = 'spotify_tracks.json'
 
     print("Fetching track URIs directly from multiple GCS buckets and folders...")
     process_and_save_to_gcs_stream(gcs_buckets, input_folder, output_bucket, output_file_name)
