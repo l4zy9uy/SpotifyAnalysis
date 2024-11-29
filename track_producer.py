@@ -104,6 +104,7 @@ def process_and_save_to_gcs_stream(buckets, folder_name, output_bucket, output_f
     with blob.open("w", content_type="application/json") as output_file:
         # Process URIs in chunks of 50
         count = 0
+        num = 0
         for chunk in chunk_list(all_track_uris, 50):
             try:
                 # Fetch track details for up to 50 URIs
@@ -124,9 +125,10 @@ def process_and_save_to_gcs_stream(buckets, folder_name, output_bucket, output_f
             except Exception as e:
                 print(f"Error processing chunk: {chunk}, Error: {e}")
         time.sleep(0.5)
-        if count % 10000 == 0:
+        if count / 10000 > num:
             print("done 1 part")
             time.sleep(10)
+            num+=1
     print(f"JSONL file successfully written to GCS: gs://{output_bucket}/{output_file_name}")
 
 
