@@ -119,7 +119,7 @@ def process_and_save_to_gcs_stream(buckets, folder_name, output_bucket, output_f
                         json_line = json.dumps(track, ensure_ascii=False)
                         output_file.write(json_line + "\n")  # Write each track as a line
                         print(f"{count} Fetched and written: {track['name']} - {track['uri']}")
-                        count+=1
+                        count += 1
             except Exception as e:
                 print(f"Error processing chunk: {chunk}, Error: {e}")
         time.sleep(0.5)
@@ -130,9 +130,6 @@ def process_and_save_to_gcs_stream(buckets, folder_name, output_bucket, output_f
 
 
 if __name__ == '__main__':
-    result = sp.tracks(["spotify:track:11dFghVXANMlKmJXsNCbNl"])
-    print(result)
-
     # List of GCS buckets to fetch files from
     gcs_buckets = [os.getenv('GCS_BUCKET1'), os.getenv('GCS_BUCKET2'), os.getenv('GCS_BUCKET3'),
                    os.getenv('GCS_BUCKET4'), os.getenv('GCS_BUCKET5'), os.getenv('GCS_BUCKET6')]
