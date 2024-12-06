@@ -75,27 +75,28 @@ def chunk_list(data, chunk_size):
         yield data[i:i + chunk_size]
 
 
-def process_and_save_to_gcs_stream(buckets, folder_name, output_bucket, output_file_name):
+def process_and_save_to_gcs_stream(bucket_name, folder_name, output_bucket, output_file_name):
     """
     Reads track URIs directly from multiple GCS buckets and folders, retrieves their details via Spotify API,
     and writes the track data to a JSONL file on GCS in a streaming fashion.
 
     Args:
-        buckets (list): List of GCS bucket names to read input files from.
+        bucket_name (list): List of GCS bucket names to read input files from.
         folder_name (str): Folder name inside each bucket to filter files.
         output_bucket (str): GCS bucket name to save the output file.
         output_file_name (str): Name of the output JSON file to save on GCS.
     """
     all_track_uris = set()
 
-    # Read URIs from multiple GCS buckets and folders
-    for uri in read_files_from_multiple_buckets(buckets, folder_name):
+    # Read URIs from the GCS bucket
+    for uri in read_files_from_multiple_buckets([bucket_name], folder_name):
         if uri:  # Skip empty lines
             all_track_uris.add(uri)  # Add URI to the set (avoiding duplicates)
 
     # Convert set to list for processing
     all_track_uris = list(all_track_uris)
-    print("Read successfully")
+    print(f"Read successfully from bucket {bucket_name}")
+
     # Get the output GCS bucket and blob
     bucket = storage_client.bucket(output_bucket)
     blob = bucket.blob(output_file_name)
@@ -104,46 +105,58 @@ def process_and_save_to_gcs_stream(buckets, folder_name, output_bucket, output_f
     with blob.open("w", content_type="application/json") as output_file:
         # Process URIs in chunks of 50
         count = 0
-        num = 0
         for chunk in chunk_list(all_track_uris, 50):
+            print("Sending API request...")
             try:
-                # Fetch track details for up to 50 URIs
-                print("Send api....")
-                try:
-                    tracks = sp.tracks(chunk)
-                except SpotifyException as e:
-                    if e.http_status == 429:  # Rate limit error
-                        retry_after = int(e.headers.get("Retry-After", 1))
-                        print(f"Rate limit hit. Retrying after {retry_after} seconds...")
-                        time.sleep(retry_after)
-                for track in tracks['tracks']:
-                    if track:  # Ensure track is not None
-                        json_line = json.dumps(track, ensure_ascii=False)
-                        output_file.write(json_line + "\n")  # Write each track as a line
-                        print(f"{count} Fetched and written: {track['name']} - {track['uri']}")
-                        count += 1
-            except Exception as e:
-                print(f"Error processing chunk: {chunk}, Error: {e}")
+                tracks = sp.tracks(chunk)
+            except SpotifyException as e:
+                if e.http_status == 429:  # Rate limit error
+                    retry_after = int(e.headers.get("Retry-After", 1))
+                    print(f"Rate limit hit. Retrying after {retry_after} seconds...")
+                    time.sleep(retry_after)
+                elif e.http_status == 403:  # Forbidden error
+                    print(f"403 Forbidden: Retrying the same chunk after 30 seconds...")
+                    time.sleep(30)
+                    continue  # Retry the same chunk
+                else:
+                    print(f"Unexpected error: {e}")
+                    raise e
+            for track in tracks['tracks']:
+                if track:  # Ensure track is not None
+                    json_line = json.dumps(track, ensure_ascii=False)
+                    output_file.write(json_line + "\n")  # Write each track as a line
+                    print(f"{count} Fetched and written: {track['name']} - {track['uri']}")
+                    count += 1
+                    if count % 10000 == 0:
+                        print("done 1 part")
+                        time.sleep(30)
         time.sleep(0.5)
-        if count / 10000 > num:
-            print("done 1 part")
-            time.sleep(10)
-            num+=1
     print(f"JSONL file successfully written to GCS: gs://{output_bucket}/{output_file_name}")
 
 
 if __name__ == '__main__':
     # List of GCS buckets to fetch files from
-    gcs_buckets = [os.getenv('GCS_BUCKET1'), os.getenv('GCS_BUCKET2'), os.getenv('GCS_BUCKET3'),
-                   os.getenv('GCS_BUCKET4'), os.getenv('GCS_BUCKET5'), os.getenv('GCS_BUCKET6')]
+    gcs_buckets = [
+        os.getenv('GCS_BUCKET2'),
+        os.getenv('GCS_BUCKET3'),
+        os.getenv('GCS_BUCKET4'),
+        os.getenv('GCS_BUCKET5'),
+        os.getenv('GCS_BUCKET6'),
+    ]
 
     # Folder inside each bucket containing the input files
     input_folder = 'track_uris'
 
     # Output GCS bucket and file name
     output_bucket = os.getenv('OUTPUT_GCS_BUCKET')
-    output_file_name = 'spotify_tracks.json'
 
-    print("Fetching track URIs directly from multiple GCS buckets and folders...")
-    process_and_save_to_gcs_stream(gcs_buckets, input_folder, output_bucket, output_file_name)
-    print("Processing finished successfully.")
+    print("Starting processing of GCS buckets...")
+
+    for idx, bucket_name in enumerate(gcs_buckets, 1):
+        output_file_name = f'spotify_tracks_bucket_{idx}.json'
+        print(f"Processing bucket {idx}: {bucket_name}")
+        process_and_save_to_gcs_stream(bucket_name, input_folder, output_bucket, output_file_name)
+        print(f"Finished processing bucket {idx}: {bucket_name}")
+        if idx < len(gcs_buckets):  # Avoid waiting after the last bucket
+            print(f"Waiting 30 minutes before processing the next bucket...")
+            time.sleep(30 * 60)  # 30 minutes
