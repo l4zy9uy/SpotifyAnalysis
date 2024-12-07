@@ -1,6 +1,7 @@
 import os
 import json
 import time
+from itertools import cycle
 
 from google.cloud import storage
 from dotenv import load_dotenv
@@ -10,14 +11,31 @@ from spotipy.exceptions import SpotifyException
 
 # Load environment variables
 load_dotenv()
-cid = os.getenv('SPOTIFY_CLIENT_ID')
-secret = os.getenv('SPOTIFY_CLIENT_SECRET')
 
-# Spotify API authentication
-client_credentials_manager = SpotifyClientCredentials(client_id=cid, client_secret=secret)
+# Spotify credentials: List of client ID and client secret pairs
+CLIENT_CREDENTIALS = [
+    {"client_id": "22b4e97088cc4a0ababfa24df4362822", "client_secret": "89e90fcc9b044661bed5cc2124ce3288"},
+    {"client_id": "9e05f5ddf55f4e2e94dcf01417dcf056", "client_secret": "9bf9f468b06446b785f9e10b55649824"},
+    {"client_id": "be722a8be96e47bab585a2a630cc7dc4", "client_secret": "3fac8ddf4d2749029c1c498b915398d2"},
+    {"client_id": "c9d456c804eb454da26c4d6ce1d79c80", "client_secret": "725483649b18485eb2d7db83acf1de7e"},
+    {"client_id": "c3900abc57b04c33b3ff75bd2e493a29", "client_secret": "709daaa62c2b408e9af403726d3463bb"}
+]
 
-sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
-sp.search(q="test", type="track")  # This should not raise an error
+# Initialize credential rotation
+credential_cycle = cycle(CLIENT_CREDENTIALS)
+
+
+def get_spotify_client():
+    """
+    Returns a Spotify client using the next available credentials in the cycle.
+    """
+    credentials = next(credential_cycle)
+    client_credentials_manager = SpotifyClientCredentials(
+        client_id=credentials["client_id"],
+        client_secret=credentials["client_secret"]
+    )
+    return spotipy.Spotify(client_credentials_manager=client_credentials_manager)
+
 
 # Initialize GCS Client
 storage_client = storage.Client()
@@ -26,12 +44,6 @@ storage_client = storage.Client()
 def is_valid_uri(uri):
     """
     Validates whether a given URI is a valid Spotify track URI.
-
-    Args:
-        uri (str): The URI to validate.
-
-    Returns:
-        bool: True if valid, False otherwise.
     """
     return uri.startswith("spotify:track:") and len(uri.split(":")) == 3
 
@@ -40,13 +52,6 @@ def read_files_from_multiple_buckets(buckets, folder_name):
     """
     Reads .txt files from specified folders in multiple GCS buckets, validates URIs,
     and yields only valid Spotify track URIs.
-
-    Args:
-        buckets (list): List of GCS bucket names.
-        folder_name (str): Folder name inside each bucket.
-
-    Yields:
-        str: Valid Spotify track URIs from all .txt files in the specified buckets and folders.
     """
     for bucket_name in buckets:
         try:
@@ -79,12 +84,6 @@ def process_and_save_to_gcs_stream(bucket_name, folder_name, output_bucket, outp
     """
     Reads track URIs directly from multiple GCS buckets and folders, retrieves their details via Spotify API,
     and writes the track data to a JSONL file on GCS in a streaming fashion.
-
-    Args:
-        bucket_name (list): List of GCS bucket names to read input files from.
-        folder_name (str): Folder name inside each bucket to filter files.
-        output_bucket (str): GCS bucket name to save the output file.
-        output_file_name (str): Name of the output JSON file to save on GCS.
     """
     all_track_uris = set()
 
@@ -103,20 +102,24 @@ def process_and_save_to_gcs_stream(bucket_name, folder_name, output_bucket, outp
 
     # Initialize a streaming upload to GCS
     with blob.open("w", content_type="application/json") as output_file:
-        # Process URIs in chunks of 50
+        spotify_client = get_spotify_client()  # Get the initial Spotify client
         count = 0
+
         for chunk in chunk_list(all_track_uris, 50):
             print("Sending API request...")
             try:
-                tracks = sp.tracks(chunk)
+                tracks = spotify_client.tracks(chunk)
             except SpotifyException as e:
                 if e.http_status == 429:  # Rate limit error
                     retry_after = int(e.headers.get("Retry-After", 1))
                     print(f"Rate limit hit. Retrying after {retry_after} seconds...")
                     time.sleep(retry_after)
+                    spotify_client = get_spotify_client()  # Rotate credentials
+                    continue  # Retry the same chunk
                 elif e.http_status == 403:  # Forbidden error
                     print(f"403 Forbidden: Retrying the same chunk after 30 seconds...")
                     time.sleep(30)
+                    spotify_client = get_spotify_client()  # Rotate credentials
                     continue  # Retry the same chunk
                 else:
                     print(f"Unexpected error: {e}")
@@ -128,10 +131,8 @@ def process_and_save_to_gcs_stream(bucket_name, folder_name, output_bucket, outp
                     print(f"{count} Fetched and written: {track['name']} - {track['uri']}")
                     count += 1
                     if count % 10000 == 0:
-                        print("done 1 part")
-                        time.sleep(30)
-        time.sleep(0.5)
-    print(f"JSONL file successfully written to GCS: gs://{output_bucket}/{output_file_name}")
+                        print(f"Processed {count} records. Pausing for 30 seconds...")
+                        time.sleep(30)  # Pause after every 10,000 records
 
 
 if __name__ == '__main__':
@@ -157,6 +158,3 @@ if __name__ == '__main__':
         print(f"Processing bucket {idx}: {bucket_name}")
         process_and_save_to_gcs_stream(bucket_name, input_folder, output_bucket, output_file_name)
         print(f"Finished processing bucket {idx}: {bucket_name}")
-        if idx < len(gcs_buckets):  # Avoid waiting after the last bucket
-            print(f"Waiting 30 minutes before processing the next bucket...")
-            time.sleep(30 * 60)  # 30 minutes
