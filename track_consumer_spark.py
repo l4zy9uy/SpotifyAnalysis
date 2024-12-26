@@ -3,6 +3,7 @@ from pyspark.sql.functions import col, concat_ws, array
 from pyspark.sql.types import StructType, StructField, StringType, IntegerType, ArrayType, BooleanType
 import os
 from dotenv import load_dotenv
+from pyspark import SparkFiles
 
 load_dotenv()
 
@@ -12,14 +13,21 @@ kafka_package = os.getenv('KAFKA_PACKAGE')
 spark = SparkSession.builder \
     .appName('SpotifyTrackProcessor') \
     .config('spark.jars.packages', kafka_package) \
-    .config('spark.executor.memory', '4g') \
-    .config('spark.driver.memory', '4g') \
+    .config('spark.executor.memory', '1g') \
+    .config('spark.driver.memory', '1g') \
     .getOrCreate()
 
 spark.sparkContext.setLogLevel("INFO")
 
+json_keyfile_path = os.getenv("JSON_KEYFILE")
+spark.sparkContext.addFile(json_keyfile_path)
+
+# Access the distributed file
+keyfile_path_in_executor = SparkFiles.get(os.path.basename(json_keyfile_path))
+print(f"Using keyfile at: {keyfile_path_in_executor}")
+
 spark.conf.set("google.cloud.auth.service.account.enable", "true")
-spark.conf.set("google.cloud.auth.service.account.json.keyfile", os.getenv("JSON_KEYFILE"))
+spark.conf.set("google.cloud.auth.service.account.json.keyfile", keyfile_path_in_executor)
 
 
 # Define Schema for Required Fields
@@ -62,7 +70,7 @@ processed_df = df.select(
     concat_ws(", ", col("album.artists.uri")).alias("album_artist_uris"),  # Combine all album artists URIs
     concat_ws(", ", col("artists.name")).alias("artist_names"),            # Combine all track artist names
     concat_ws(", ", col("artists.uri")).alias("artist_uris"),              # Combine all track artist URIs
-    concat_ws(", ", col("available_markets")).alias("available_markets")   # Convert array to string
+    concat_ws(", ", col("available_markets")).alias("available_markets"),   # Convert array to string   
 )
 
 # Write the processed data to a CSV file
@@ -70,6 +78,10 @@ output_csv_path = "gs://don-result-csv/processed_spotify_tracks/"
 processed_df.coalesce(1).write \
     .mode('append') \
     .option('header', 'true') \
+    .option('quote', '"') \
+    .option('escape', '"') \
     .csv(output_csv_path)
 
+non_numeric_rows = df.filter(~col("popularity").cast("int").isNotNull())
+non_numeric_rows.show()
 print(f"Processed data written to {output_csv_path}")
